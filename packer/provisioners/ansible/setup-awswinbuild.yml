@@ -1,0 +1,99 @@
+---
+- name: AWSWINBUILD PLAYBOOK
+  hosts: 'all'
+  become: yes
+  become_user: Administrator
+
+  tasks:
+
+  - name: Change the hostname
+    win_command: wmic computersystem where name="%COMPUTERNAME%" call rename name="iVNT_Builder_BT"
+
+  - name: Install all critical and security updates
+    win_updates:
+      category_names:
+      - CriticalUpdates
+      - SecurityUpdates
+      state: installed
+    register: update_result
+
+  - name: Reboot host if required
+    win_reboot:
+    when: update_result.reboot_required
+
+  - name: Ensure ninja and python installed via Chocolatey
+    win_chocolatey:
+      name: 
+      - ninja
+      - python
+      - curl
+      - openjdk8
+      - git
+      state: present
+
+  - name: Install nsis version via Chocolatey
+    win_chocolatey:
+      name: nsis
+      version: '2.46.0.20150406'
+      state: present
+
+  - name: Install cmake via Chocolatey
+    win_chocolatey:
+      name: cmake
+      install_args: 'ADD_CMAKE_TO_PATH=System'
+      state: present
+
+  - name: Install git-lfs via Chocolatey
+    win_chocolatey:
+      name: git-lfs
+      ignore-dependencies: yes
+      state: present
+
+  - name: Install git-lfs.install via Chocolatey
+    win_chocolatey:
+      name: get-lfs.install
+      state: present
+
+  - name: Install cmake via Chocolatey
+    win_chocolatey:
+      name: Git-Credential-Manager-for-Windows
+      source: 'https://www.myget.org/F/jivkok-chocolatey/api/v2'
+      state: present
+
+  #MAKE DIRECTORY TEMP  
+
+  - name: Download the MSVC Build Tools 2017 package
+    win_get_url:
+      url: https://aka.ms/vs/15/release/vs_buildtools.exe
+      dest: C:\temp\vs_buildtools.exe
+
+  - name: Ensure MSVC Build Tools 2017 is installed via win_command
+    win_command: C:\temp\vs_buildtools.exe /qn /norestart /wait /nocache /add Microsoft.VisualStudio.Workload.VCTools /add Microsoft.VisualStudio.Component.Windows10SDK.17134
+  
+  - name: Download the Microsoft Visual C++ Redistributable Package
+    win_get_url:
+      url: http://download.microsoft.com/download/0/5/6/056DCDA9-D667-4E27-8001-8A0C6971D6B1/vcredist_x64.exe
+      dest: C:\temp\vcredist_x64.exe
+
+  - name: Ensure Microsoft Visual C++ Redistributable Package is installed via win_command
+    win_command: C:\temp\vcredist_x64.exe /qn /norestart /wait /passive
+
+  - name: Create local group to contain new users
+    win_group:
+      name: LocalGroup
+
+  - name: Create btuser user
+    win_user:
+      name: '{{ item.name }}'
+      password: '{{ item.password }}'
+      groups: LocalGroup
+      update_password: no
+      password_never_expires: yes
+    loop:
+    - name: btuser
+      password: btuser
+
+  - name: Copy git-credentials and change ownership
+    copy:
+      src: files/git-credentials
+      dest: C:/Users/btuser/.git-credentials

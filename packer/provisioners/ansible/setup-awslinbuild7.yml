@@ -1,0 +1,267 @@
+---
+- name: AWSLINBUILD7 PLAYBOOK
+  hosts: 'all'
+  become: yes
+  become_method: sudo
+
+  tasks:
+
+  - name: Change the hostname 
+    hostname:
+      name: 'awslinbuild7'
+
+  - name: Add to /etc/hosts
+    lineinfile:
+      dest: /etc/hosts
+      regexp: '^127\.0\.0\.1[ \t]+localhost'
+      line: '127.0.0.1 localhost awslinbuild7'
+      state: present 
+
+  - name: Check that the somefile.conf exists
+    stat:
+      path: /etc/cloud/cloud.cfg
+    register: stat_result
+
+  - name: Replaces cloud.cfg
+    copy:
+      src: files/cloud.cfg
+      dest: /etc/cloud/cloud.cfg
+    when: stat_result.stat.exists == True 
+
+  - name: Add to network file
+    lineinfile:
+      dest: /etc/sysconfig/network
+      regexp: 'HOSTNAME'
+      line: 'HOSTNAME=awslinbuild7'
+      state: present
+
+  - name: Update all packages
+    yum:
+      name: "*"
+      state: latest
+  
+  - name: ensure a list of packages installed
+    yum:
+      name: "{{ packages }}"
+    vars:
+      packages:
+      - libstdc++-4.8.5-39.el7.i686
+      - vim
+      - bash-completion
+      - htop
+      - tmux
+      - screen
+      - telnet
+      - tree
+      - curl
+      - python-firewall
+      - sudo
+      - sqlite
+      - make
+      - zip
+      - unzip
+      - which
+      - redhat-lsb
+      - mesa-libGL-devel
+      - mesa-libEGL-devel
+      - openssl
+      - openssl-devel
+      - unixODBC
+      - postgresql-libs
+      - rpm-build
+      - procps
+      - spectool
+      - chrpath
+      - java-1.8.0-openjdk
+      - patchelf
+      - pigz
+      - ccache
+      - git-lfs
+      - libxkbcommon-x11
+      - pulseaudio
+      - pulseaudio-libs-devel
+      - pxz
+
+  - name: Create GCC directory
+    file:
+      path: /gcc-7.1.0
+      state: directory
+
+  - name: Installs GCC
+    copy:
+      src: files/gcc-7.1.0.tar.gz
+      dest: /tmp/gcc-7.1.0.tar.gz
+
+  - name: Extracts GCC
+    unarchive:
+      src: /tmp/gcc-7.1.0.tar.gz
+      dest: /
+      remote_src: yes
+
+  - name: Create Install directory
+    file:
+      path: /install
+      state: directory
+
+  - name: Create Install link 
+    file:
+      src: "/gcc-7.1.0"
+      dest: "/install/gcc-7.1.0"
+      state: link
+
+  - name: Add Wandisco repository
+    yum_repository:
+      name: wandisco-git
+      description: Wandisco GIT Repository for newer version of GIT
+      baseurl: http://opensource.wandisco.com/centos/7/git/$basearch/
+      enabled: yes
+      gpgcheck: yes
+      gpgkey: http://opensource.wandisco.com/RPM-GPG-KEY-WANdisco
+
+  - name: Enable Wandisco Repo
+    shell: rpm --import http://opensource.wandisco.com/RPM-GPG-KEY-WANdisco
+    async: 15
+    poll: 5
+
+  - name: Update all packages
+    yum:
+      name: "*"
+      state: latest
+
+  - name: Install GIT
+    yum:
+      name: git
+      state: latest
+
+  - name: Make sure we have a 'wheel' group
+    group:
+      name: wheel
+      state: present
+
+  - name: Add jenkins group
+    group:
+      name: jenkins
+
+  - name: Add "jenkins" user
+    user:
+      name: jenkins
+      groups: jenkins, wheel
+      home: /home/jenkins
+      shell: /bin/bash
+      password: jenkins1234
+      createhome: yes
+      system: yes
+
+  - name: Create Build Tools directory
+    file:
+      path: /home/jenkins/build-tools
+      state: directory
+
+  - name: Create Build Tools link 
+    file:
+      src: "/gcc-7.1.0"
+      dest: "/home/jenkins/build-tools/gcc-7.1.0"
+      state: link
+
+  - name: Download Ninja
+    get_url:
+      url: https://github.com/ninja-build/ninja/releases/download/v1.8.2/ninja-linux.zip
+      dest: /tmp/ninja-linux.zip
+
+  - name: Extract Ninja archive
+    unarchive:
+      src: /tmp/ninja-linux.zip
+      dest: /usr/local/bin
+      remote_src: yes
+
+  - name: Create Ninja link 
+    file:
+      src: "/usr/local/bin/ninja"
+      dest: "/usr/bin/ninja"
+      state: link
+
+  - name: Create Ninja link 2
+    file:
+      src: "/usr/local/bin/ninja"
+      dest: "/usr/bin/ninja-build"
+      state: link
+
+  - name: Download Cmake
+    get_url:
+      url: https://cmake.org/files/v3.14/cmake-3.14.0-Linux-x86_64.tar.gz
+      dest: /tmp/cmake-3.14.0-Linux-x86_64.tar.gz
+
+  - name: Extract Cmake archive
+    unarchive:
+      src: /tmp/cmake-3.14.0-Linux-x86_64.tar.gz
+      dest: /usr
+      extra_opts: "--strip-components=1"
+      remote_src: yes
+
+  - name: Copy Makeself and make executable
+    copy:
+      src: files/makeselff/
+      dest: /usr/local/bin/
+      mode: a+x
+
+  - name: Copy git-credentials and change ownership
+    copy:
+      src: files/jenkins-slave
+      dest: /usr/local/bin/jenkins-slave
+      owner: jenkins
+      group: jenkins
+
+  - name: Copy git-credentials and change ownership
+    copy:
+      src: files/git-credentials
+      dest: /home/jenkins/.git-credentials
+      owner: jenkins
+      group: jenkins
+
+  - name: Copy git-credentials to root as well
+    copy:
+      src: files/git-credentials
+      dest: /root/.git-credentials
+
+  - name: Run GIT credential for Jenkins user.
+    command: git config --global credential.helper 'store --file /home/jenkins/.git-credentials'
+
+  - name: Run GIT credential for root.
+    command: git config --global credential.helper 'store --file /root/.git-credentials'
+
+  - name: Set CC Environmental Variable
+    shell: echo 'CC=/gcc-7.1.0/bin/gcc' >> /home/jenkins/.bashrc
+    async: 15
+    poll: 5
+
+  - name: Set CXX Environmental Variable
+    shell: echo 'CXX=/gcc-7.1.0/bin/g++' >> /home/jenkins/.bashrc
+    async: 15
+    poll: 5
+
+  - name: Set PATH Environmental Variable
+    shell: echo 'PATH=/gcc-7.1.0/bin:$PATH' >> /home/jenkins/.bashrc
+    async: 15
+    poll: 5
+
+  - name: Set LD_LIBRARY_PATH Environmental Variable
+    shell: echo 'LD_LIBRARY_PATH=/gcc-7.1.0/lib64:/gcc-7.1.0/lib' >> /home/jenkins/.bashrc
+    async: 15
+    poll: 5
+
+  - name: Set label Environmental Variable
+    shell: echo 'label=linux64' >> /home/jenkins/.bashrc
+    async: 15
+    poll: 5
+
+  - name: Create Jenkins SSH directory
+    file:
+      path: /home/jenkins/.ssh
+      state: directory
+
+  - name: Copy authkeys and change ownership
+    copy:
+      src: files/authkeys
+      dest: /home/jenkins/.ssh/authorized_keys
+      owner: jenkins
+      group: jenkins

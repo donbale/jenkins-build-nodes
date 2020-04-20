@@ -1,0 +1,26 @@
+#!/bin/bash
+set -ex
+
+# Packer interprets paths relative to its execution directory
+cd packer
+
+# Strip non-JSON comments out of the template file
+
+if [ $1 = AWSLINBUILD7 ]
+then 
+	sed -e 's_^\s*//.*__g' packer-build-centos.json &> .packer-build.pre.json
+	packer build "${@:2}" .packer-build.pre.json
+#	packer build "$@" .packer-build.pre.json
+fi
+
+if [ $1 = AWSWINBUILD ]
+then
+	sed -e 's_^\s*//.*__g' packer-build-windows.json &> .packer-build.pre.json
+	packer build "${@:2}" .packer-build.pre.json
+fi
+
+if [ $1 = AWSDOCKERBUILD ]
+then
+	sed -e 's_^\s*//.*__g' packer-build-docker.json &> .packer-build.pre.json
+	packer build "${@:2}" .packer-build.pre.json
+fi

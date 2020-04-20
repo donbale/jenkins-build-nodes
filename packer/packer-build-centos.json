@@ -1,0 +1,115 @@
+{
+	"variables": {
+        "aws_access_key": "",
+        "aws_secret_key": "",
+        "ami_name": "centos",
+        "aws_region": "eu-west-1",
+        "ssh_username": "centos",
+        "vpc_id": "vpc-0aca370fca2ffdb02",
+        "subnet_id": "subnet-09a3cd93539dbc6f1",
+        "security_group_id": "sg-0708866f86a7e87bf",
+        "source_ami": "ami-0ff760d16d9497662",
+        "vbox_host_net_name": "vboxnet0"
+    },
+
+    "builders": [{
+        "type": "amazon-ebs",
+        "access_key": "{{user `aws_access_key`}}",
+        "secret_key": "{{user `aws_secret_key`}}",
+        "region": "{{user `aws_region`}}",
+        "instance_type": "t2.micro",
+        "ami_block_device_mappings": [ {
+            "device_name": "/dev/sda1",
+            "volume_size": 50,
+            "delete_on_termination": true
+        } ],
+        "launch_block_device_mappings": [ {
+            "device_name": "/dev/sda1",
+            "volume_size": 50,
+            "delete_on_termination": true
+        } ],
+        "force_deregister": "true",
+        "ssh_username": "{{user `ssh_username`}}",
+        "communicator": "ssh",
+        "associate_public_ip_address": false,
+        "subnet_id": "{{user `subnet_id`}}",
+        "ami_name": "{{user `ami_name`}}",
+        "source_ami": "{{user `source_ami`}}",
+        "run_tags": {
+            "Name": "packer-build-image"
+        }
+    },
+    {
+      "type": "virtualbox-iso",
+      "format": "ova",
+      "vm_name": "iVNT_Linbuild7_{{timestamp}}",
+
+      // machine setup
+      "disk_size": 40520,
+      "guest_os_type": "RedHat_64",
+      "headless": true,
+      "vboxmanage": [
+        [ "modifyvm", "{{.Name}}", "--memory", "3033"],
+        [ "modifyvm", "{{.Name}}", "--cpus", "3"],
+
+        [ "modifyvm", "{{.Name}}", "--nic2", "hostonly"],
+        [ "modifyvm", "{{.Name}}", "--hostonlyadapter2", "{{user `vbox_host_net_name`}}" ]
+      ],
+
+      // Packer serves files in this directory over HTTP, such as the kickstart config
+      "http_directory": "http",
+      "boot_command": [
+        "<tab> text append net.ifnames=0 biosdevname=0 ks=http://{{.HTTPIP}}:{{.HTTPPort}}/kickstart.cfg<enter><wait>"
+      ],
+      "boot_wait": "10s",
+      "shutdown_command": "halt -h -p",
+
+      // OS installation media
+      "iso_url": "http://mirrors.mit.edu/centos/7/isos/x86_64/CentOS-7-x86_64-Minimal-1908.iso",
+      "iso_checksum": "9a2c47d97b9975452f7d582264e9fc16d108ed8252ac6816239a3b58cef5c53d",
+      "iso_checksum_type": "sha256",
+
+      // setup SSH communicator for provisioners
+      "communicator": "ssh",
+      "ssh_wait_timeout": "10000s",
+      "ssh_port": 22,
+      "ssh_username": "root",
+      "ssh_password": "admin",
+      // these files are uploaded into the ssh user's home directory
+      "guest_additions_path": "VBoxGuestAdditions_{{.Version}}.iso",
+      "virtualbox_version_file": ".vbox_version"
+    }],
+
+    "provisioners": [{
+            "type": "shell",
+            "inline": "while [ ! -f /var/lib/cloud/instance/boot-finished ]; do echo 'Waiting for cloud-init...'; sleep 1; done",
+            "only": ["amazon-ebs"]
+        },
+        {
+            "type": "shell",
+            "script": "./provisioners/scripts/bootstrap.sh"
+        },
+        {
+            "type": "shell",
+            "scripts": [
+            "./provisioners/scripts/virtualbox.sh",
+            "./provisioners/scripts/cleanup.sh"
+            ],
+            // Ensures this provisioner runs only in the virtualbox build
+            "only": ["virtualbox-iso"]
+        },
+        {
+            "type": "ansible",
+            "playbook_file": "./provisioners/ansible/setup-awslinbuild7.yml"
+        }
+    ],
+
+    "post-processors": [
+    {
+      "type": "manifest",
+      "output": "manifest.json",
+      "strip_path": true,
+      "only":["amazon-ebs"]
+    }
+  ]                                                                                                                                                                                                                                                                                      
+}
